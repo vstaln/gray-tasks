@@ -1,0 +1,4 @@
+# todo + kanban unit tests each guard HOME/GRAY_HOME with their own lock;
+# in one test binary they race, so run tests serially.
+[env]
+RUST_TEST_THREADS = "1"
