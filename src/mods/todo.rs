@@ -53,8 +53,10 @@ pub fn manifest_todo() -> Value {
 /// `result`, or None on timeout.
 pub type Ask<'a> = dyn FnMut(&Value) -> Option<Value> + 'a;
 
+#[allow(dead_code)]
 type Pending = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 /// Internal cap on host/ask waits — under the host's outer TTL.
+#[allow(dead_code)]
 const ASK_TTL: Duration = Duration::from_secs(300);
 const Q_TOGGLE: &str = "todo-toggle";
 const LABEL_JUST_SHOW: &str = "just show";
@@ -86,6 +88,7 @@ fn state_dir() -> PathBuf {
     let home = std::env::var_os("GRAY_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".gray")))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".gray")))
         .unwrap_or_else(|| PathBuf::from("."));
     home.join("todos")
 }
@@ -111,10 +114,16 @@ fn state_path(cwd: &str) -> PathBuf {
 
 fn load(path: &Path) -> State {
     let Ok(text) = std::fs::read_to_string(path) else {
-        return State { todos: Vec::new(), next_id: 1 };
+        return State {
+            todos: Vec::new(),
+            next_id: 1,
+        };
     };
     let Ok(v) = serde_json::from_str::<Value>(&text) else {
-        return State { todos: Vec::new(), next_id: 1 };
+        return State {
+            todos: Vec::new(),
+            next_id: 1,
+        };
     };
     let todos: Vec<Todo> = v
         .get("todos")
@@ -149,7 +158,10 @@ fn save(path: &Path, state: &State) -> std::io::Result<()> {
         .map(|t| json!({"id": t.id, "text": t.text, "done": t.done}))
         .collect();
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json!({"todos": todos, "next_id": state.next_id}).to_string())?;
+    std::fs::write(
+        &tmp,
+        json!({"todos": todos, "next_id": state.next_id}).to_string(),
+    )?;
     std::fs::rename(&tmp, path)
 }
 
@@ -180,7 +192,11 @@ fn call_tool(name: &str, args: &Value, cwd: &str) -> Result<String, String> {
             }
             let id = state.next_id;
             state.next_id += 1;
-            state.todos.push(Todo { id, text: text.to_string(), done: false });
+            state.todos.push(Todo {
+                id,
+                text: text.to_string(),
+                done: false,
+            });
             if let Err(e) = save(&path, &state) {
                 return Err(format!("Error: could not save todos: {e}"));
             }
@@ -198,7 +214,10 @@ fn call_tool(name: &str, args: &Value, cwd: &str) -> Result<String, String> {
             if let Err(e) = save(&path, &state) {
                 return Err(format!("Error: could not save todos: {e}"));
             }
-            Ok(format!("Todo #{id} {}", if done { "completed" } else { "uncompleted" }))
+            Ok(format!(
+                "Todo #{id} {}",
+                if done { "completed" } else { "uncompleted" }
+            ))
         }
         "clear" => {
             let count = state.todos.len();
@@ -293,10 +312,15 @@ fn sha1_hex(data: &str) -> String {
         msg.push(0);
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in msg.chunks_exact(64) {
+    for chunk in msg.as_chunks::<64>().0 {
         let mut w = [0u32; 80];
         for i in 0..16 {
-            w[i] = u32::from_be_bytes([chunk[4 * i], chunk[4 * i + 1], chunk[4 * i + 2], chunk[4 * i + 3]]);
+            w[i] = u32::from_be_bytes([
+                chunk[4 * i],
+                chunk[4 * i + 1],
+                chunk[4 * i + 2],
+                chunk[4 * i + 3],
+            ]);
         }
         for i in 16..80 {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
@@ -367,6 +391,7 @@ pub fn handle_todo(req: &Value, ask: &mut Ask) -> (Option<Value>, bool) {
     (Some(json!({ "id": id, "result": result })), false)
 }
 
+#[allow(dead_code)]
 fn main_todo() -> std::io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("manifest") {
         println!("{}", manifest_todo());
@@ -385,7 +410,9 @@ fn main_todo() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
             let Ok(line) = line else { break };
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if let Some(id) = v.get("id").and_then(Value::as_str)
                 && v.get("method").is_none()
             {
@@ -483,7 +510,9 @@ mod tests {
 
     fn tool(action: &str, extra: Value, cwd: &str) -> Value {
         let mut args = json!({"action": action});
-        args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
         call(
             "tool/call",
             json!({"name": "todo", "args": args, "session": {"id": "s", "cwd": cwd}}),
@@ -510,14 +539,22 @@ mod tests {
     fn add_list_toggle_clear_roundtrip() {
         with_home(|_| {
             let cwd = "/tmp/project-a";
-            assert!(tool("list", json!({}), cwd)["result"]["content"].as_str().unwrap().contains("No todos"));
+            assert!(
+                tool("list", json!({}), cwd)["result"]["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("No todos")
+            );
 
             let r = tool("add", json!({"text": "first"}), cwd);
             assert_eq!(r["result"]["content"], "Added todo #1: first");
             let r = tool("add", json!({"text": "second"}), cwd);
             assert_eq!(r["result"]["content"], "Added todo #2: second");
 
-            let list = tool("list", json!({}), cwd)["result"]["content"].as_str().unwrap().to_string();
+            let list = tool("list", json!({}), cwd)["result"]["content"]
+                .as_str()
+                .unwrap()
+                .to_string();
             assert!(list.contains("[ ] #1: first") && list.contains("[ ] #2: second"));
 
             let r = tool("toggle", json!({"id": 1}), cwd);
@@ -526,9 +563,21 @@ mod tests {
             assert_eq!(r["result"]["content"], "Todo #1 uncompleted");
 
             // Errors are is_error results, not panics.
-            assert!(tool("add", json!({}), cwd)["result"]["is_error"].as_bool().unwrap());
-            assert!(tool("toggle", json!({}), cwd)["result"]["is_error"].as_bool().unwrap());
-            assert!(tool("toggle", json!({"id": 99}), cwd)["result"]["is_error"].as_bool().unwrap());
+            assert!(
+                tool("add", json!({}), cwd)["result"]["is_error"]
+                    .as_bool()
+                    .unwrap()
+            );
+            assert!(
+                tool("toggle", json!({}), cwd)["result"]["is_error"]
+                    .as_bool()
+                    .unwrap()
+            );
+            assert!(
+                tool("toggle", json!({"id": 99}), cwd)["result"]["is_error"]
+                    .as_bool()
+                    .unwrap()
+            );
 
             let r = tool("clear", json!({}), cwd);
             assert_eq!(r["result"]["content"], "Cleared 2 todos");
@@ -543,8 +592,14 @@ mod tests {
         with_home(|home| {
             tool("add", json!({"text": "a"}), "/tmp/proj-a");
             tool("add", json!({"text": "b"}), "/tmp/proj-b");
-            let a = tool("list", json!({}), "/tmp/proj-a")["result"]["content"].as_str().unwrap().to_string();
-            let b = tool("list", json!({}), "/tmp/proj-b")["result"]["content"].as_str().unwrap().to_string();
+            let a = tool("list", json!({}), "/tmp/proj-a")["result"]["content"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let b = tool("list", json!({}), "/tmp/proj-b")["result"]["content"]
+                .as_str()
+                .unwrap()
+                .to_string();
             assert!(a.contains("a") && !a.contains("b"));
             assert!(b.contains("b") && !b.contains("a"));
             // The file exists under ~/.gray/todos/<sha1>.json.
@@ -584,7 +639,10 @@ mod tests {
             );
             let text = r["result"]["text"].as_str().unwrap();
             assert!(text.contains("Todo #2 completed"), "{text}");
-            assert!(text.contains("✓ #2 two") && text.contains("○ #1 one"), "{text}");
+            assert!(
+                text.contains("✓ #2 two") && text.contains("○ #1 one"),
+                "{text}"
+            );
         });
     }
 
@@ -600,15 +658,24 @@ mod tests {
                 &mut ask,
             );
             let text = r["result"]["text"].as_str().unwrap();
-            assert!(text.contains("0/1 completed") && text.contains("○ #1 one"), "{text}");
-            let list = tool("list", json!({}), cwd)["result"]["content"].as_str().unwrap().to_string();
+            assert!(
+                text.contains("0/1 completed") && text.contains("○ #1 one"),
+                "{text}"
+            );
+            let list = tool("list", json!({}), cwd)["result"]["content"]
+                .as_str()
+                .unwrap()
+                .to_string();
             assert!(list.contains("[ ] #1: one"));
         });
     }
 
     #[test]
     fn shutdown_replies_then_exits() {
-        let (reply, exit) = handle_todo(&json!({ "id": 2, "method": "plugin/shutdown" }), &mut |_p: &Value| None);
+        let (reply, exit) = handle_todo(
+            &json!({ "id": 2, "method": "plugin/shutdown" }),
+            &mut |_p: &Value| None,
+        );
         assert!(reply.is_some() && exit);
     }
 }

@@ -307,13 +307,11 @@ impl Goal {
 /// `1. [x] text` or `- [ ] text` → item. Numbered form keeps the checklist
 /// visibly ordered; `-` bullets still parse (hand edits).
 fn parse_item(line: &str) -> Option<Item> {
-    let rest = line
-        .strip_prefix("- ")
-        .or_else(|| {
-            let (num, rest) = line.split_once(". ")?;
-            num.trim().parse::<usize>().ok()?;
-            Some(rest)
-        })?;
+    let rest = line.strip_prefix("- ").or_else(|| {
+        let (num, rest) = line.split_once(". ")?;
+        num.trim().parse::<usize>().ok()?;
+        Some(rest)
+    })?;
     let (mark, text) = rest.split_once(']')?;
     let checked = match mark.trim() {
         "[x" | "[X" => true,
@@ -339,8 +337,7 @@ impl Store {
     pub fn new(home: &Path) -> anyhow::Result<Store> {
         let dir = goals_dir(home);
         if !dir.exists() {
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("create {}", dir.display()))?;
+            std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         }
         Ok(Store {
             home: home.to_path_buf(),
@@ -370,9 +367,7 @@ impl Store {
 
     /// The "current" goal: most recently updated still-active one.
     pub fn active(&self) -> Option<Goal> {
-        self.list()
-            .into_iter()
-            .find(|g| g.status == Status::Active)
+        self.list().into_iter().find(|g| g.status == Status::Active)
     }
 
     /// Resolve a user-supplied id or unambiguous id prefix.
@@ -452,19 +447,13 @@ impl Store {
         let dir = goals_dir(&self.home);
         let path = goal.path(&self.home);
         let tmp = dir.join(format!(".{}.tmp", goal.id));
-        std::fs::write(&tmp, goal.render())
-            .with_context(|| format!("write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path)
-            .with_context(|| format!("rename to {}", path.display()))?;
+        std::fs::write(&tmp, goal.render()).with_context(|| format!("write {}", tmp.display()))?;
+        std::fs::rename(&tmp, &path).with_context(|| format!("rename to {}", path.display()))?;
         Ok(())
     }
 
     /// Load, mutate, bump `updated`, save.
-    pub fn update(
-        &self,
-        goal: &mut Goal,
-        f: impl FnOnce(&mut Goal),
-    ) -> anyhow::Result<()> {
+    pub fn update(&self, goal: &mut Goal, f: impl FnOnce(&mut Goal)) -> anyhow::Result<()> {
         f(goal);
         goal.updated = now_iso();
         self.save(goal)

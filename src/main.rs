@@ -40,12 +40,19 @@ type Pending = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 const ASK_TTL: Duration = Duration::from_secs(300);
 
 fn module_tools(m: Value) -> Vec<Value> {
-    m.get("tools").and_then(Value::as_array).cloned().unwrap_or_default()
+    m.get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn manifest() -> Value {
     let mut tools = Vec::new();
-    for m in [todo::manifest_todo(), kanban::manifest_kanban(), goal::manifest_goal()] {
+    for m in [
+        todo::manifest_todo(),
+        kanban::manifest_kanban(),
+        goal::manifest_goal(),
+    ] {
         tools.extend(module_tools(m));
     }
     json!({
@@ -162,7 +169,9 @@ fn sidecar() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
             let Ok(line) = line else { break };
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if let Some(id) = v.get("id").and_then(Value::as_str)
                 && v.get("method").is_none()
             {

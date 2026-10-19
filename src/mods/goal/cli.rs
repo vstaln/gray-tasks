@@ -20,7 +20,15 @@ pub struct GoalArgs {
 /// Words that start a real subcommand; anything else after `/goal` is the
 /// objective shorthand (`/goal add CSV export` → `new "add CSV export"`).
 pub const VERBS: &[&str] = &[
-    "new", "list", "show", "done", "check", "drop", "audit", "audit-run", "help",
+    "new",
+    "list",
+    "show",
+    "done",
+    "check",
+    "drop",
+    "audit",
+    "audit-run",
+    "help",
 ];
 
 /// Route argv to a parse: bare → status; verb-first → clap; else the
@@ -62,7 +70,11 @@ pub enum GoalCommand {
     Audit { id: Option<String> },
     /// `audit-run` — internal: the detached audit child
     #[command(hide = true)]
-    AuditRun { id: String, #[arg(long)] cwd: Option<String> },
+    AuditRun {
+        id: String,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
 }
 
 /// What the wire returns: `text` renders inline; `prompt` becomes a session
@@ -79,8 +91,8 @@ impl Reply {
             prompt: None,
         }
     }
-    pub fn to_wire(self) -> serde_json::Value {
-        if let Some(p) = self.prompt {
+    pub fn to_wire(&self) -> serde_json::Value {
+        if let Some(p) = &self.prompt {
             serde_json::json!({ "prompt": p, "text": self.text })
         } else {
             serde_json::json!({ "text": self.text })
@@ -279,11 +291,17 @@ fn kickoff(store: &Store, id: Option<&str>, cwd: &Path) -> anyhow::Result<Reply>
     let sel = id.unwrap_or("");
     let goal = store
         .resolve(sel)
-        .or_else(|| store.list().into_iter().find(|g| g.status != Status::Dropped))
+        .or_else(|| {
+            store
+                .list()
+                .into_iter()
+                .find(|g| g.status != Status::Dropped)
+        })
         .context("no goal to audit")?;
     Ok(Reply::text(audit::kickoff(store, &goal, cwd)?))
 }
 
+#[allow(dead_code)]
 pub fn usage() -> String {
     "/goal — persistent goals + independent completion audit\n\
      /goal <desc>   create a goal (the agent drafts the ordered checklist)\n\
@@ -368,7 +386,10 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
                 reopen(g);
             });
             match r {
-                Ok(()) => (format!("goal {}: added item {}", g.id, g.items.len()), false),
+                Ok(()) => (
+                    format!("goal {}: added item {}", g.id, g.items.len()),
+                    false,
+                ),
                 Err(e) => (format!("goal: {e:#}"), true),
             }
         }
