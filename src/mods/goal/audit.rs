@@ -202,8 +202,13 @@ pub fn audit_run(home: &Path, id: &str, cwd: &Path) -> anyhow::Result<String> {
 /// otherwise a bare `gray -p` — no plugins, so the plugin can't grade itself.
 fn auditor_command(prompt: &str) -> Command {
     if let Ok(spec) = std::env::var("GRAY_GOAL_AUDITOR") {
-        let mut c = Command::new("sh");
-        c.args(["-c", &spec]);
+        let (shell, flag) = if cfg!(windows) {
+            ("cmd", "/C")
+        } else {
+            ("sh", "-c")
+        };
+        let mut c = Command::new(shell);
+        c.args([flag, &spec]);
         return c;
     }
     let gray = std::env::var("GRAY_BIN").unwrap_or_else(|_| "gray".to_string());
@@ -230,8 +235,7 @@ pub fn kickoff(store: &Store, goal: &Goal, cwd: &Path) -> anyhow::Result<String>
     let exe = std::env::current_exe().context("current_exe")?;
     let log = goals_log(store, &g.id);
     let out = std::fs::File::create(&log).unwrap_or_else(|_| {
-        std::fs::File::create(std::env::temp_dir().join("gray-goal-audit.log"))
-            .expect("audit log")
+        std::fs::File::create(std::env::temp_dir().join("gray-goal-audit.log")).expect("audit log")
     });
     let err = out.try_clone().context("clone log fd")?;
     Command::new(exe)

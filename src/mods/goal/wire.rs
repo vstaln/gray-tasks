@@ -84,11 +84,15 @@ pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool)
     let Some(id) = req.get("id").cloned() else {
         return (None, method == "plugin/shutdown");
     };
-    let params = req.get("params").cloned().unwrap_or(serde_json::Value::Null);
+    let params = req
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let home = match crate::goal::gray_home() {
         Ok(h) => h,
         Err(e) => {
-            let error = serde_json::json!({ "code": "unavailable", "message": format!("goal: {e:#}") });
+            let error =
+                serde_json::json!({ "code": "unavailable", "message": format!("goal: {e:#}") });
             return (Some(serde_json::json!({ "id": id, "error": error })), false);
         }
     };
@@ -113,7 +117,10 @@ pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool)
             return (Some(serde_json::json!({ "id": id, "error": error })), false);
         }
     };
-    (Some(serde_json::json!({ "id": id, "result": result })), false)
+    (
+        Some(serde_json::json!({ "id": id, "result": result })),
+        false,
+    )
 }
 
 fn sidecar_loop() -> anyhow::Result<()> {

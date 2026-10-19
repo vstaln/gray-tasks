@@ -30,8 +30,10 @@ const COL_WIDTH: usize = 24;
 /// `result`, or None on timeout.
 pub type Ask<'a> = dyn FnMut(&Value) -> Option<Value> + 'a;
 
+#[allow(dead_code)]
 type Pending = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 /// Internal cap on host/ask waits — under the host's outer TTL.
+#[allow(dead_code)]
 const ASK_TTL: Duration = Duration::from_secs(300);
 const Q_CARD: &str = "kanban-card";
 const Q_COL: &str = "kanban-col";
@@ -78,6 +80,7 @@ fn state_dir() -> PathBuf {
     let home = std::env::var_os("GRAY_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".gray")))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".gray")))
         .unwrap_or_else(|| PathBuf::from("."));
     home.join("kanban")
 }
@@ -218,10 +221,10 @@ fn act_boards(cwd: &str) -> Result<String, String> {
     let mut names: Vec<String> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
-            if let Some(name) = e.file_name().to_str() {
-                if let Some(stem) = name.strip_suffix(".json") {
-                    names.push(stem.to_string());
-                }
+            if let Some(name) = e.file_name().to_str()
+                && let Some(stem) = name.strip_suffix(".json")
+            {
+                names.push(stem.to_string());
             }
         }
     }
@@ -263,7 +266,11 @@ fn act_add(cwd: &str, board: &str, args: &Value) -> Result<String, String> {
     let next = b.get("next").and_then(Value::as_u64).unwrap_or(1);
     let id = format!("k{next}");
     let mut card = json!({"id": id, "title": title});
-    if let Some(note) = args.get("note").and_then(Value::as_str).filter(|n| !n.is_empty()) {
+    if let Some(note) = args
+        .get("note")
+        .and_then(Value::as_str)
+        .filter(|n| !n.is_empty())
+    {
         card["note"] = json!(note);
     }
     b["next"] = json!(next + 1);
@@ -274,10 +281,10 @@ fn act_add(cwd: &str, board: &str, args: &Value) -> Result<String, String> {
 
 fn locate_card(b: &Value, id: &str) -> Result<(&'static str, usize), String> {
     for c in COLS {
-        if let Some(cards) = b["cols"][c].as_array() {
-            if let Some(pos) = cards.iter().position(|k| k["id"].as_str() == Some(id)) {
-                return Ok((c, pos));
-            }
+        if let Some(cards) = b["cols"][c].as_array()
+            && let Some(pos) = cards.iter().position(|k| k["id"].as_str() == Some(id))
+        {
+            return Ok((c, pos));
         }
     }
     Err(format!("no card '{id}' on this board"))
@@ -309,7 +316,11 @@ fn act_move(cwd: &str, board: &str, args: &Value, target: Option<&str>) -> Resul
 }
 
 fn act_rm(cwd: &str, board: &str, args: &Value) -> Result<String, String> {
-    if let Some(id) = args.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+    if let Some(id) = args
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
         let mut b = load_board(cwd, board)?;
         let (src, pos) = locate_card(&b, id)?;
         let card = b["cols"][src][pos].clone();
@@ -350,7 +361,9 @@ fn call_tool(name: &str, args: &Value, session: &Value) -> Result<String, String
         "done" => act_move(&cwd, board, args, Some("done")),
         "show" => Ok(render(&load_board(&cwd, board)?)),
         "rm" => act_rm(&cwd, board, args),
-        other => Err(format!("unknown action '{other}' — boards|create|add|move|done|show|rm")),
+        other => Err(format!(
+            "unknown action '{other}' — boards|create|add|move|done|show|rm"
+        )),
     }
 }
 
@@ -413,10 +426,7 @@ fn move_interactive(cwd: &str, board: &str, ask: &mut Ask) -> String {
         return render(&b);
     }
     match act_move(cwd, board, &json!({"id": id, "col": col}), None) {
-        Ok(text) => format!(
-            "{text}\n\n{}",
-            render(&load_board(cwd, board).unwrap_or(b))
-        ),
+        Ok(text) => format!("{text}\n\n{}", render(&load_board(cwd, board).unwrap_or(b))),
         Err(e) => e,
     }
 }
@@ -478,6 +488,7 @@ pub fn handle_kanban(req: &Value, ask: &mut Ask) -> (Option<Value>, bool) {
     (Some(json!({ "id": id, "result": result })), false)
 }
 
+#[allow(dead_code)]
 fn main_kanban() -> std::io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("manifest") {
         println!("{}", manifest_kanban());
@@ -496,7 +507,9 @@ fn main_kanban() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
             let Ok(line) = line else { break };
-            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if let Some(id) = v.get("id").and_then(Value::as_str)
                 && v.get("method").is_none()
             {
@@ -627,7 +640,10 @@ mod tests {
         assert!(r["content"].as_str().unwrap().contains("→ done"));
         let r = tool(json!({"action": "show"}));
         let text = r["content"].as_str().unwrap();
-        assert!(text.contains("DONE (1)") && text.contains("write tests"), "{text}");
+        assert!(
+            text.contains("DONE (1)") && text.contains("write tests"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -635,7 +651,10 @@ mod tests {
         let _g = LOCK.lock().unwrap();
         let _h = TempHome::new();
         assert_eq!(tool(json!({"action": "add"}))["is_error"], true);
-        assert_eq!(tool(json!({"action": "show", "board": "nope"}))["is_error"], true);
+        assert_eq!(
+            tool(json!({"action": "show", "board": "nope"}))["is_error"],
+            true
+        );
         assert_eq!(
             tool(json!({"action": "move", "id": "k9", "col": "mars"}))["is_error"],
             true
@@ -671,7 +690,10 @@ mod tests {
             json!({ "name": "/kanban", "argv": [], "session": {"cwd": "/tmp/proj"} }),
         );
         let text = r["result"]["text"].as_str().unwrap();
-        assert!(text.contains("kanban: main") && text.contains("ship it"), "{text}");
+        assert!(
+            text.contains("kanban: main") && text.contains("ship it"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -718,10 +740,16 @@ mod tests {
             json!({ "name": "/kanban", "argv": ["move"], "session": {"cwd": "/tmp/proj"} }),
         );
         let text = r["result"]["text"].as_str().unwrap();
-        assert!(text.contains("kanban: main") && text.contains("k1 x"), "{text}");
+        assert!(
+            text.contains("kanban: main") && text.contains("k1 x"),
+            "{text}"
+        );
         // Card unmoved: still in backlog.
         let r = tool(json!({"action": "show"}));
-        assert!(r["content"].as_str().unwrap().contains("BACKLOG (1)"), "{r}");
+        assert!(
+            r["content"].as_str().unwrap().contains("BACKLOG (1)"),
+            "{r}"
+        );
     }
 
     #[test]
@@ -737,12 +765,18 @@ mod tests {
             &mut ask,
         );
         let text = r["result"]["text"].as_str().unwrap();
-        assert!(text.contains("kanban: main") && !text.contains("moved"), "{text}");
+        assert!(
+            text.contains("kanban: main") && !text.contains("moved"),
+            "{text}"
+        );
     }
 
     #[test]
     fn shutdown_replies_then_exits() {
-        let (reply, exit) = handle_kanban(&json!({ "id": 2, "method": "plugin/shutdown" }), &mut |_p: &Value| None);
+        let (reply, exit) = handle_kanban(
+            &json!({ "id": 2, "method": "plugin/shutdown" }),
+            &mut |_p: &Value| None,
+        );
         assert!(reply.is_some() && exit);
     }
 }
