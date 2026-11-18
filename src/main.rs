@@ -62,6 +62,12 @@ fn manifest() -> Value {
         "sidecar_args": ["sidecar"],
         "tools": tools,
         "commands": ["/tasks", "/todos", "/kanban", "/goal"],
+        "command_descriptions": {
+            "/tasks": "list the task trackers",
+            "/todos": "show and toggle the project todo list",
+            "/kanban": "show and move cards on the kanban board",
+            "/goal": "track a goal checklist and claim it done",
+        },
         "hooks": ["prompt/context", "agent/before_start"],
         "capabilities": ["host.ask"],
         "completion": goal::COMPLETION,
