@@ -112,19 +112,24 @@ fn state_path(cwd: &str) -> PathBuf {
     state_dir().join(format!("{}.json", sha1_hex(cwd)))
 }
 
-fn load(path: &Path) -> State {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return State {
-            todos: Vec::new(),
-            next_id: 1,
-        };
+fn load(path: &Path) -> Result<State, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(State {
+                todos: Vec::new(),
+                next_id: 1,
+            });
+        }
+        Err(e) => {
+            return Err(format!(
+                "Error: could not read todos at {}: {e}",
+                path.display()
+            ));
+        }
     };
-    let Ok(v) = serde_json::from_str::<Value>(&text) else {
-        return State {
-            todos: Vec::new(),
-            next_id: 1,
-        };
-    };
+    let v = serde_json::from_str::<Value>(&text)
+        .map_err(|e| format!("Error: could not parse todos at {}: {e}", path.display()))?;
     let todos: Vec<Todo> = v
         .get("todos")
         .and_then(Value::as_array)
@@ -145,7 +150,7 @@ fn load(path: &Path) -> State {
         .and_then(Value::as_i64)
         .filter(|n| *n > 0)
         .unwrap_or_else(|| todos.iter().map(|t| t.id).max().unwrap_or(0) + 1);
-    State { todos, next_id }
+    Ok(State { todos, next_id })
 }
 
 fn save(path: &Path, state: &State) -> std::io::Result<()> {
@@ -173,7 +178,7 @@ fn call_tool(name: &str, args: &Value, cwd: &str) -> Result<String, String> {
     }
     let action = args.get("action").and_then(Value::as_str).unwrap_or("");
     let path = state_path(cwd);
-    let mut state = load(&path);
+    let mut state = load(&path)?;
     match action {
         "list" => Ok(if state.todos.is_empty() {
             "No todos".into()
@@ -261,7 +266,10 @@ fn run_command(argv: &[&str], cwd: &str, ask: &mut Ask) -> String {
     if !argv.is_empty() {
         return "usage: /todos".into();
     }
-    let state = load(&state_path(cwd));
+    let state = match load(&state_path(cwd)) {
+        Ok(state) => state,
+        Err(e) => return e,
+    };
     if state.todos.is_empty() {
         return render_list(&state);
     }
@@ -293,7 +301,10 @@ fn run_command(argv: &[&str], cwd: &str, ask: &mut Ask) -> String {
         Some(t) => {
             let id = t.id;
             match call_tool("todo", &json!({"action": "toggle", "id": id}), cwd) {
-                Ok(text) => format!("{text}\n\n{}", render_list(&load(&state_path(cwd)))),
+                Ok(text) => match load(&state_path(cwd)) {
+                    Ok(state) => format!("{text}\n\n{}", render_list(&state)),
+                    Err(e) => format!("{text}\n\n{e}"),
+                },
                 Err(e) => e,
             }
         }
