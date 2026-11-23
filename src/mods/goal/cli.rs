@@ -301,7 +301,6 @@ fn kickoff(store: &Store, id: Option<&str>, cwd: &Path) -> anyhow::Result<Reply>
     Ok(Reply::text(audit::kickoff(store, &goal, cwd)?))
 }
 
-#[allow(dead_code)]
 pub fn usage() -> String {
     "/goal — persistent goals + independent completion audit\n\
      /goal <desc>   create a goal (the agent drafts the ordered checklist)\n\
@@ -312,6 +311,39 @@ pub fn usage() -> String {
      /goal drop [id] drop a goal (file kept, status=dropped)\n\
      /goal audit [id] independent audit of checked items → pass/fail verdict\n"
         .to_string()
+}
+
+const ITEM_MAX: usize = 90;
+
+fn clip(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= ITEM_MAX {
+        return flat;
+    }
+    let mut out: String = flat.chars().take(ITEM_MAX - 1).collect();
+    out.push('\u{2026}');
+    out
+}
+
+fn item_row(n: usize, item: &crate::goal::Item) -> String {
+    format!(
+        "{} {n}  {}\n",
+        if item.checked { "\u{2713}" } else { "\u{25cb}" },
+        clip(&item.text)
+    )
+}
+
+fn progress_line(g: &crate::goal::Goal) -> String {
+    let (done, total) = g.progress();
+    format!("   {done}/{total} done\n")
+}
+
+fn rows(g: &crate::goal::Goal) -> String {
+    let mut out = String::new();
+    for (n, item) in g.items.iter().enumerate() {
+        out.push_str(&item_row(n + 1, item));
+    }
+    out
 }
 
 /// Dispatch for the model-facing `goal` tool. Returns `(content, is_error)`.
@@ -337,7 +369,23 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
         }
     };
     match action {
-        "status" => (status_line(store), false),
+        "status" => {
+            let head = goal
+                .title
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .map(clip)
+                .unwrap_or_default();
+            let mut out = String::new();
+            if !head.is_empty() {
+                out.push_str(&head);
+                out.push('\n');
+            }
+            out.push_str(&rows(&goal));
+            out.push_str(&progress_line(&goal));
+            (out, false)
+        }
         "set_items" => {
             let items: Vec<String> = args
                 .get("items")
@@ -364,10 +412,11 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
                 reopen(g);
             });
             match r {
-                Ok(()) => (
-                    format!("goal {}: checklist set ({} items)", g.id, g.items.len()),
-                    false,
-                ),
+                Ok(()) => {
+                    let mut out = rows(&g);
+                    out.push_str(&progress_line(&g));
+                    (out, false)
+                }
                 Err(e) => (format!("goal: {e:#}"), true),
             }
         }
@@ -386,20 +435,24 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
                 reopen(g);
             });
             match r {
-                Ok(()) => (
-                    format!("goal {}: added item {}", g.id, g.items.len()),
-                    false,
-                ),
+                Ok(()) => {
+                    let n = g.items.len();
+                    (
+                        format!(
+                            "+ {n}  {}\n{}",
+                            clip(&g.items[n - 1].text),
+                            progress_line(&g)
+                        ),
+                        false,
+                    )
+                }
                 Err(e) => (format!("goal: {e:#}"), true),
             }
         }
         "check_item" | "uncheck_item" => {
             let n = args.get("n").and_then(|n| n.as_u64()).unwrap_or(0) as usize;
             if n == 0 || n > goal.items.len() {
-                return (
-                    format!("n must be 1..={} for goal {}", goal.items.len(), goal.id),
-                    true,
-                );
+                return (format!("n must be 1..={}", goal.items.len()), true);
             }
             let check = action == "check_item";
             let mut g = goal;
@@ -411,15 +464,11 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
                 reopen(g);
             });
             match r {
-                Ok(()) => (
-                    format!(
-                        "goal {}: item {n} {} ({})",
-                        g.id,
-                        if check { "checked" } else { "unchecked" },
-                        g.items[n - 1].text
-                    ),
-                    false,
-                ),
+                Ok(()) => {
+                    let mut out = item_row(n, &g.items[n - 1]);
+                    out.push_str(&progress_line(&g));
+                    (out, false)
+                }
                 Err(e) => (format!("goal: {e:#}"), true),
             }
         }
@@ -430,18 +479,15 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
             if !open.is_empty() {
                 let mut g = goal;
                 let _ = store.update(&mut g, |g| g.claim_blocked = true);
-                let lines: Vec<String> = open
+                let nums = open
                     .iter()
-                    .map(|&n| format!("  {n}. {}", g.items[n - 1].text))
-                    .collect();
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 return (
                     format!(
-                        "goal {} not complete — {} item(s) still open:\n{}\n\
-                        Finish them and check them off (action=check_item), or revise the plan. \
-                        Completion is independently audited, not self-graded.",
-                        g.id,
-                        open.len(),
-                        lines.join("\n")
+                        "complete refused \u{b7} {} item(s) still open: {nums}\n",
+                        open.len()
                     ),
                     true,
                 );
@@ -453,11 +499,7 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
             });
             match r {
                 Ok(()) => (
-                    format!(
-                        "goal {} marked complete. An independent audit (`/goal audit`) is the \
-                        real grade — ask the user to run it, or expect it to run at review time.",
-                        g.id
-                    ),
+                    "complete \u{b7} waiting for /goal audit\n".to_string(),
                     false,
                 ),
                 Err(e) => (format!("goal: {e:#}"), true),

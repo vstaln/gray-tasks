@@ -1,21 +1,16 @@
-//! `gray-goal` sidecar + CLI, one binary:
+//! The goal part's wire surface inside gray-tasks.
 //!
-//! - `gray-goal manifest` → manifest JSON on stdout (install probe;
-//!   answering registers `cli_argv`, so `gray goal …` `exec`s back here)
-//! - `gray-goal sidecar` / bare binary on a pipe → wire v1.1 NDJSON loop:
-//!   `prompt/context` serves the active goal + next unchecked item,
-//!   `command/run` carries `/goal …`, `tool/call` carries the `goal` tool,
-//!   `agent/before_start` delivers the completion nudge
-//! - `gray-goal <args>` → the CLI surface (also `audit-run`, the detached
-//!   auditor child `/goal audit` spawns)
+//! `prompt/context` serves the active goal + next unchecked item,
+//! `command/run` carries `/goal …`, `tool/call` carries the `goal` tool, and
+//! `agent/before_start` delivers the completion nudge. `handle_goal` is one
+//! request in, one reply out; gray-tasks' dispatcher fans the hooks out.
 //!
-//! Blocking std I/O, same shape as `gray-memory`/`gray-questions`; no async.
+//! Blocking serde only, same shape as the standalone `gray-goal` sidecar.
 
-use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::goal::Store;
 use crate::goal::cli;
-use crate::goal::{PLUGIN_NAME, Store};
 
 fn session_cwd(params: &serde_json::Value) -> PathBuf {
     params["session"]["cwd"]
@@ -76,9 +71,9 @@ fn tool_call(home: &Path, params: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "content": content, "is_error": is_error })
 }
 
-/// Merged-plugin entry point (added for gray-tasks): one request → reply,
-/// same dispatch as `sidecar_loop` below. Notifications (no id) get no reply;
-/// unknown methods get JSON-RPC -32601 instead of being dropped.
+/// Merged-plugin entry point: one request → reply, dispatched the way the
+/// standalone `gray-goal` sidecar did. Notifications (no id) get no reply;
+/// unknown methods get JSON-RPC -32601.
 pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool) {
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let Some(id) = req.get("id").cloned() else {
@@ -121,92 +116,4 @@ pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool)
         Some(serde_json::json!({ "id": id, "result": result })),
         false,
     )
-}
-
-fn sidecar_loop() -> anyhow::Result<()> {
-    let home = crate::goal::gray_home()?;
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        if v.get("method").and_then(|m| m.as_str()) == Some("plugin/shutdown") {
-            break;
-        }
-        // Notifications (no id) need no reply: event/notify lands here.
-        let Some(id) = v.get("id").and_then(|i| i.as_u64()) else {
-            continue;
-        };
-        let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
-        let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
-        let result = match method {
-            "plugin/manifest" => crate::goal::manifest_goal(),
-            "prompt/context" => match Store::new(&home) {
-                Ok(store) => serde_json::json!({ "text": crate::goal::served_text(&store) }),
-                Err(_) => serde_json::json!({}),
-            },
-            "agent/before_start" => match Store::new(&home) {
-                Ok(store) => match crate::goal::completion_nudge(&store) {
-                    Some(text) => serde_json::json!({ "text": text }),
-                    None => serde_json::json!({}),
-                },
-                Err(_) => serde_json::json!({}),
-            },
-            "command/run" => command_run(&home, &params),
-            "tool/call" => tool_call(&home, &params),
-            _ => continue, // unknown methods/lines are ignored
-        };
-        let reply = serde_json::json!({ "id": id, "result": result });
-        let mut o = stdout.lock();
-        writeln!(o, "{reply}")?;
-        o.flush()?;
-    }
-    Ok(())
-}
-
-pub fn main_goal() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("manifest") => {
-            println!("{}", crate::goal::manifest_goal());
-            return;
-        }
-        Some("sidecar") => {
-            if let Err(e) = sidecar_loop() {
-                eprintln!("{PLUGIN_NAME}: {e:#}");
-                std::process::exit(1);
-            }
-            return;
-        }
-        None => {
-            // A TTY human gets the hint; a pipe/host gets the wire loop.
-            if std::io::stdin().is_terminal() {
-                eprintln!(
-                    "gray-goal is a plugin sidecar — drive it via `gray goal …` or install with `gray plugin install`"
-                );
-                return;
-            }
-            if let Err(e) = sidecar_loop() {
-                eprintln!("{PLUGIN_NAME}: {e:#}");
-                std::process::exit(1);
-            }
-            return;
-        }
-        _ => {}
-    }
-    match cli::args_for(args) {
-        Ok(args) => match cli::run(&args) {
-            Ok(reply) => print!("{}", reply.text),
-            Err(e) => {
-                eprintln!("{e:#}");
-                std::process::exit(1);
-            }
-        },
-        Err(e) => {
-            // clap prints its own usage for flag errors; exit code is its contract.
-            std::process::exit(if e.use_stderr() { 1 } else { 0 });
-        }
-    }
 }
