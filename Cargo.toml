@@ -1,9 +1,9 @@
 [package]
 name = "gray-tasks"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
-description = "Merged task-tracking plugin for the gray agent harness: todo, kanban, goal in one sidecar."
+description = "Task tracking and multi-step drivers for the gray agent harness: todo, kanban, goal, loop, gsd, workflows, plan and plannotator in switchable parts."
 
 [[bin]]
 name = "tasks"
@@ -13,8 +13,21 @@ path = "src/main.rs"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+gray-questions = { git = "https://github.com/vstaln/gray-questions", tag = "v0.1.1" }
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
+yaml-rust2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
 
 [profile.release]
 strip = true

@@ -13,7 +13,6 @@
 //! `toggle` action. With no ask channel it falls back to the plain render.
 
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -43,6 +42,7 @@ pub fn manifest_todo() -> Value {
             }
         }],
         "commands": ["/todos"],
+        "command_descriptions": {"/todos": "show and toggle the project todo list"},
         "capabilities": ["host.ask"],
     })
 }
@@ -53,10 +53,8 @@ pub fn manifest_todo() -> Value {
 /// `result`, or None on timeout.
 pub type Ask<'a> = dyn FnMut(&Value) -> Option<Value> + 'a;
 
-#[allow(dead_code)]
 type Pending = Arc<Mutex<HashMap<String, mpsc::Sender<Value>>>>;
 /// Internal cap on host/ask waits — under the host's outer TTL.
-#[allow(dead_code)]
 const ASK_TTL: Duration = Duration::from_secs(300);
 const Q_TOGGLE: &str = "todo-toggle";
 const LABEL_JUST_SHOW: &str = "just show";
@@ -88,7 +86,6 @@ fn state_dir() -> PathBuf {
     let home = std::env::var_os("GRAY_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".gray")))
-        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".gray")))
         .unwrap_or_else(|| PathBuf::from("."));
     home.join("todos")
 }
@@ -389,80 +386,6 @@ pub fn handle_todo(req: &Value, ask: &mut Ask) -> (Option<Value>, bool) {
         }
     };
     (Some(json!({ "id": id, "result": result })), false)
-}
-
-#[allow(dead_code)]
-fn main_todo() -> std::io::Result<()> {
-    if std::env::args().nth(1).as_deref() == Some("manifest") {
-        println!("{}", manifest_todo());
-        return Ok(());
-    }
-    let stdout = Arc::new(Mutex::new(std::io::stdout()));
-    let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-    let counter = Mutex::new(0u64);
-
-    // Reader thread: host answers (string id, no method) go to `pending`;
-    // host requests (id + method) go to the work channel. Notifications have
-    // no id and are dropped here, same as `handle` returning None.
-    let (work_tx, work_rx) = mpsc::channel::<Value>();
-    let reader_pending = pending.clone();
-    std::thread::spawn(move || {
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let Ok(line) = line else { break };
-            let Ok(v) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            if let Some(id) = v.get("id").and_then(Value::as_str)
-                && v.get("method").is_none()
-            {
-                if let Some(tx) = reader_pending.lock().expect("pending").remove(id) {
-                    let _ = tx.send(v.get("result").cloned().unwrap_or(Value::Null));
-                }
-                continue;
-            }
-            let shutdown = v.get("method").and_then(Value::as_str) == Some("plugin/shutdown");
-            if (v.get("id").is_some() || shutdown) && work_tx.send(v).is_err() {
-                break;
-            }
-        }
-    });
-
-    // host/ask: write the request, block on the pending channel. Errors and
-    // timeouts surface as None → callers degrade to a text answer.
-    let mut ask = |params: &Value| -> Option<Value> {
-        let id = {
-            let mut n = counter.lock().expect("id counter");
-            *n += 1;
-            format!("q{n}")
-        };
-        let (tx, rx) = mpsc::channel();
-        pending.lock().expect("pending").insert(id.clone(), tx);
-        {
-            let req = json!({"id": id, "method": "host/ask", "params": params});
-            let mut o = stdout.lock().expect("stdout");
-            let _ = writeln!(o, "{req}");
-            let _ = o.flush();
-        }
-        let reply = rx.recv_timeout(ASK_TTL).ok();
-        pending.lock().expect("pending").remove(&id);
-        reply
-    };
-
-    for req in work_rx {
-        let (reply, exit) = handle_todo(&req, &mut ask);
-        if let Some(reply) = reply {
-            let mut o = stdout.lock().expect("stdout");
-            let _ = writeln!(o, "{reply}");
-            let _ = o.flush();
-        }
-        if exit {
-            break;
-        }
-    }
-    // The reader thread is a detached stdin pump; returning ends the process
-    // with it — nothing to join.
-    Ok(())
 }
 
 #[cfg(test)]
