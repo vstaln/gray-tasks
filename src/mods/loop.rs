@@ -2007,8 +2007,6 @@ const CLI_VERBS: &[&str] = &[
     "--session",
 ];
 
-/// `gray tasks loop <args…>` — the former `gray-loop` CLI (`wakeup`, `stop`,
-/// `status`, `task`, `learn`, `done`, `fail`, `help`). Exits with its code.
 pub fn loop_cli(args: &[String]) -> i32 {
     if matches!(
         args.first().map(String::as_str),
@@ -2020,7 +2018,6 @@ pub fn loop_cli(args: &[String]) -> i32 {
     cli(args)
 }
 
-/// `gray tasks widget` — the status snapshot the host's status line polls.
 pub fn widget() {
     let sid = std::env::var("GRAY_SESSION_ID").unwrap_or_default();
     println!("{}", sched::widget_snapshot(&sid));

@@ -1,12 +1,3 @@
-//! The goal part's wire surface inside gray-tasks.
-//!
-//! `prompt/context` serves the active goal + next unchecked item,
-//! `command/run` carries `/goal …`, `tool/call` carries the `goal` tool, and
-//! `agent/before_start` delivers the completion nudge. `handle_goal` is one
-//! request in, one reply out; gray-tasks' dispatcher fans the hooks out.
-//!
-//! Blocking serde only, same shape as the standalone `gray-goal` sidecar.
-
 use std::path::{Path, PathBuf};
 
 use crate::goal::Store;
@@ -71,9 +62,6 @@ fn tool_call(home: &Path, params: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "content": content, "is_error": is_error })
 }
 
-/// Merged-plugin entry point: one request → reply, dispatched the way the
-/// standalone `gray-goal` sidecar did. Notifications (no id) get no reply;
-/// unknown methods get JSON-RPC -32601.
 pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool) {
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let Some(id) = req.get("id").cloned() else {

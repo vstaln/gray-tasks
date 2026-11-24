@@ -1,26 +1,7 @@
-//! gray-tasks — one sidecar for every task-tracking and multi-step driver.
 //!
-//! Parts, each named after the standalone plugin it replaces: `todo`,
-//! `kanban`, `goal`, `loop`, `gsd`, `workflows`, `plan`, `plannotator`.
-//! Every part lives nearly verbatim under `mods/` with its own state files
-//! and slash commands; only the wire plumbing is shared. `src/parts.rs`
-//! decides which parts are on (`$GRAY_HOME/plugins/parts.json`, overrides
-//! only) and a disabled part contributes nothing: no tools, commands,
-//! completion words, or hooks, and no events.
-//!
-//! Dispatch:
-//! - `tool/call`   → the owning part by `params.name`.
-//! - `command/run` → the owning part by `params.name`; `/tasks` is the
-//!   merged overview.
-//! - `prompt/context`     → goal + workflows + plannotator, texts joined.
-//! - `agent/before_start` → goal + loop + plan, texts joined.
 //! - `tool/before`        → plan (read-only gate).
-//! - `event/notify`       → loop (turn_end drives self-paced loops).
 //!
 //! argv: `manifest` prints the merged manifest; `sidecar` / bare-on-a-pipe
-//! runs the wire loop; `widget` prints loop's status snapshot; `<part>
-//! <args…>` runs that part's former CLI (goal, loop, workflows,
-//! plannotator); anything else lists the parts.
 
 use std::collections::HashMap;
 use std::io::{BufRead, IsTerminal, Write};
@@ -115,8 +96,6 @@ fn union_strs(acc: &mut Vec<Value>, m: &Value, key: &str) {
     }
 }
 
-/// Completion entries are either bare words or `{arg, description}`; dedupe
-/// on the word so goal's described `list` and workflows' bare `list` collapse.
 fn union_completion(acc: &mut Vec<Value>, m: &Value) {
     let word = |v: &Value| {
         v.as_str()
@@ -298,7 +277,6 @@ fn dispatch(owner: Owner, req: &Value, ask: &mut Ask, link: &r#loop::HostLink) -
     }
 }
 
-/// `/tasks` — merged-plugin overview, listing only the enabled parts.
 fn tasks_command(parts: &parts::Parts) -> String {
     let rows: [(&str, &str); 8] = [
         ("todo", "/todos    per-project todo list (tool: todo)"),
@@ -491,7 +469,6 @@ fn sidecar(parts: &parts::Parts) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `gray-tasks <part> <args…>` — that part's former CLI surface.
 fn part_cli(part: &str, args: &[String], parts: &parts::Parts) -> std::io::Result<()> {
     match part {
         "goal" => {
