@@ -1,6 +1,6 @@
 [package]
 name = "gray-tasks"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT"
 description = "Task tracking and multi-step drivers for the gray agent harness: todo, kanban, goal, loop, gsd, workflows, plan and plannotator in switchable parts."

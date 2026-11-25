@@ -569,6 +569,10 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
         None => sidecar(&parts),
+        Some("-h" | "--help" | "help") => {
+            println!("{}", usage(&parts));
+            Ok(())
+        }
         Some(other) => {
             eprintln!("unknown part '{other}'\n\n{}", usage(&parts));
             std::process::exit(2);
