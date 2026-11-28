@@ -696,3 +696,17 @@ pub fn queue_continuation(home: &Path, sid: &str, card: &str, prompt: &str) -> b
     let _ = std::fs::remove_file(&tmp);
     false
 }
+
+pub fn footer_status(store: &Store, sid: &str) -> String {
+    let Some(goal) = store.active() else {
+        return String::new();
+    };
+    if sid.is_empty() || goal.session != sid {
+        return String::new();
+    }
+    if goal.paused {
+        return "\u{25ce} goal paused".to_string();
+    }
+    let (done, total) = goal.progress();
+    format!("\u{25ce} pursuing goal \u{b7} {done}/{total}")
+}
