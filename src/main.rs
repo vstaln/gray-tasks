@@ -329,6 +329,12 @@ fn handle(
         if (method == "event/notify" || method == "plugin/shutdown") && parts.on("loop") {
             let _ = r#loop::handle_loop(req, Some(link));
         }
+        if method == "event/notify"
+            && params.get("type").and_then(Value::as_str) == Some("turn_end")
+            && parts.on("goal")
+        {
+            goal::wire::on_turn_end(&params);
+        }
         return (None, method == "plugin/shutdown");
     };
     let result = match method {
@@ -429,8 +435,9 @@ fn sidecar(parts: &parts::Parts) -> std::io::Result<()> {
                 }
                 continue;
             }
-            let shutdown = v.get("method").and_then(Value::as_str) == Some("plugin/shutdown");
-            if (v.get("id").is_some() || shutdown) && work_tx.send(v).is_err() {
+            let method = v.get("method").and_then(Value::as_str);
+            let notice = matches!(method, Some("plugin/shutdown") | Some("event/notify"));
+            if (v.get("id").is_some() || notice) && work_tx.send(v).is_err() {
                 break;
             }
         }

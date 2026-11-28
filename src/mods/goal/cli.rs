@@ -26,6 +26,8 @@ pub const VERBS: &[&str] = &[
     "done",
     "check",
     "drop",
+    "pause",
+    "resume",
     "audit",
     "audit-run",
     "help",
@@ -66,6 +68,10 @@ pub enum GoalCommand {
     Check { n: usize, id: Option<String> },
     /// Drop a goal (kept on disk, status=dropped)
     Drop { id: Option<String> },
+    /// Stop auto-continuing the active goal
+    Pause,
+    /// Auto-continue the active goal in this session
+    Resume,
     /// Spawn the independent completion auditor
     Audit { id: Option<String> },
     /// `audit-run` — internal: the detached audit child
@@ -103,24 +109,26 @@ impl Reply {
 pub fn run(args: &GoalArgs) -> anyhow::Result<Reply> {
     let home = crate::goal::gray_home()?;
     let cwd = std::env::current_dir()?;
-    run_at(args, &home, &cwd)
+    run_at(args, &home, &cwd, "")
 }
 
 /// Testable seam: dispatch against explicit home + session cwd.
-pub fn run_at(args: &GoalArgs, home: &Path, cwd: &Path) -> anyhow::Result<Reply> {
+pub fn run_at(args: &GoalArgs, home: &Path, cwd: &Path, session: &str) -> anyhow::Result<Reply> {
     let store = Store::new(home)?;
     match &args.command {
         // `/goal` bare — status of the active goal.
         None => Ok(Reply::text(status_line(&store))),
         Some(GoalCommand::New { desc }) => {
             ensure!(!desc.is_empty(), "usage: /goal new <description>");
-            create(&store, &desc.join(" "), cwd)
+            create(&store, &desc.join(" "), cwd, session)
         }
         Some(GoalCommand::List) => Ok(Reply::text(list(&store))),
         Some(GoalCommand::Show { id }) => show(&store, id.as_deref()),
         Some(GoalCommand::Done { arg }) => done(&store, arg.as_deref()),
         Some(GoalCommand::Check { n, id }) => check_item(&store, *n, id.as_deref()),
         Some(GoalCommand::Drop { id }) => drop_goal(&store, id.as_deref()),
+        Some(GoalCommand::Pause) => pause(&store),
+        Some(GoalCommand::Resume) => resume(&store, session),
         Some(GoalCommand::Audit { id }) => kickoff(&store, id.as_deref(), cwd),
         Some(GoalCommand::AuditRun { id, cwd: c }) => {
             let dir = c
@@ -188,8 +196,36 @@ fn show(store: &Store, id: Option<&str>) -> anyhow::Result<Reply> {
     Ok(Reply::text(out))
 }
 
-fn create(store: &Store, desc: &str, cwd: &Path) -> anyhow::Result<Reply> {
-    let goal = store.create(desc, cwd)?;
+fn pause(store: &Store) -> anyhow::Result<Reply> {
+    let mut g = store.active().context("no active goal")?;
+    store.update(&mut g, |g| g.paused = true)?;
+    Ok(Reply::text(format!(
+        "goal {} paused \u{b7} /goal resume continues it\n",
+        g.id
+    )))
+}
+
+fn resume(store: &Store, session: &str) -> anyhow::Result<Reply> {
+    let mut g = store.active().context("no active goal")?;
+    store.update(&mut g, |g| {
+        g.paused = false;
+        g.stalls = 0;
+        g.seen = String::new();
+        if !session.is_empty() {
+            g.session = session.to_string();
+        }
+    })?;
+    Ok(Reply {
+        text: format!("goal {} resumed\n", g.id),
+        prompt: Some(format!(
+            "Resume work on the active goal {}: \"{}\". Check its state with the goal tool and continue with the next unchecked item.",
+            g.id, g.title
+        )),
+    })
+}
+
+fn create(store: &Store, desc: &str, cwd: &Path, session: &str) -> anyhow::Result<Reply> {
+    let goal = store.create(desc, cwd, session)?;
     let id = goal.id.clone();
     Ok(Reply {
         text: format!("goal {id} created — {}\n", goal.title),
@@ -309,6 +345,8 @@ pub fn usage() -> String {
      /goal done [n] check item n, or mark the goal done\n\
      /goal check <n> check item n\n\
      /goal drop [id] drop a goal (file kept, status=dropped)\n\
+     /goal pause    stop auto-continuing the active goal\n\
+     /goal resume   auto-continue the active goal in this session\n\
      /goal audit [id] independent audit of checked items → pass/fail verdict\n"
         .to_string()
 }
@@ -347,7 +385,7 @@ fn rows(g: &crate::goal::Goal) -> String {
 }
 
 /// Dispatch for the model-facing `goal` tool. Returns `(content, is_error)`.
-pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
+pub fn tool_call(store: &Store, args: &serde_json::Value, session: &str) -> (String, bool) {
     let action = args
         .get("action")
         .and_then(|a| a.as_str())
@@ -362,6 +400,10 @@ pub fn tool_call(store: &Store, args: &serde_json::Value) -> (String, bool) {
             );
         }
     };
+    let mut goal = goal;
+    if goal.session.is_empty() && !session.is_empty() && goal.status == Status::Active {
+        let _ = store.update(&mut goal, |g| g.session = session.to_string());
+    }
     // Mutating items on a done goal reopens it — work resumed.
     let reopen = |g: &mut crate::goal::Goal| {
         if g.status == Status::Done {
