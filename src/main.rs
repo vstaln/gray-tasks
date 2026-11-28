@@ -329,8 +329,59 @@ fn handle(
         if (method == "event/notify" || method == "plugin/shutdown") && parts.on("loop") {
             let _ = r#loop::handle_loop(req, Some(link));
         }
+        if method == "event/notify"
+            && params.get("type").and_then(Value::as_str) == Some("turn_end")
+            && parts.on("goal")
+        {
+            goal::wire::on_turn_end(&params);
+            push_goal_status(link, &params);
+        }
         return (None, method == "plugin/shutdown");
     };
+    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+    let goal_touch = match method {
+        "agent/before_start" => true,
+        "command/run" => name == "/goal",
+        "tool/call" => name == goal::TOOL_NAME,
+        _ => false,
+    };
+    if goal_touch && parts.on("goal") {
+        let (reply, _) = handle_inner(req, method, &params, id, ask, link, parts);
+        push_goal_status(link, &params);
+        return (reply, false);
+    }
+    handle_inner(req, method, &params, id, ask, link, parts)
+}
+
+fn push_goal_status(link: &r#loop::HostLink, params: &Value) {
+    let sid = params["session"]["id"].as_str().unwrap_or("");
+    let Ok(home) = goal::gray_home() else {
+        return;
+    };
+    let Ok(store) = goal::Store::new(&home) else {
+        return;
+    };
+    let text = goal::footer_status(&store, sid);
+    let msg = json!({
+        "id": "goal-status",
+        "method": "host/status",
+        "params": {"key": "goal", "text": text},
+    });
+    let mut out = link.out.lock().expect("stdout");
+    let _ = writeln!(out, "{msg}");
+    let _ = out.flush();
+}
+
+fn handle_inner(
+    req: &Value,
+    method: &str,
+    params: &Value,
+    id: Value,
+    ask: &mut Ask,
+    link: &r#loop::HostLink,
+    parts: &parts::Parts,
+) -> (Option<Value>, bool) {
+    let params = params.clone();
     let result = match method {
         "plugin/manifest" => manifest(parts),
         "prompt/context" => {
@@ -429,8 +480,9 @@ fn sidecar(parts: &parts::Parts) -> std::io::Result<()> {
                 }
                 continue;
             }
-            let shutdown = v.get("method").and_then(Value::as_str) == Some("plugin/shutdown");
-            if (v.get("id").is_some() || shutdown) && work_tx.send(v).is_err() {
+            let method = v.get("method").and_then(Value::as_str);
+            let notice = matches!(method, Some("plugin/shutdown") | Some("event/notify"));
+            if (v.get("id").is_some() || notice) && work_tx.send(v).is_err() {
                 break;
             }
         }

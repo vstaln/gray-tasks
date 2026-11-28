@@ -28,7 +28,7 @@ fn command_run(home: &Path, params: &serde_json::Value) -> serde_json::Value {
         .unwrap_or_default();
     let cwd = session_cwd(params);
     match cli::args_for(argv) {
-        Ok(args) => match cli::run_at(&args, home, &cwd) {
+        Ok(args) => match cli::run_at(&args, home, &cwd, session_id(params)) {
             Ok(reply) => reply.to_wire(),
             Err(e) => serde_json::json!({ "text": format!("goal: {e:#}") }),
         },
@@ -58,8 +58,24 @@ fn tool_call(home: &Path, params: &serde_json::Value) -> serde_json::Value {
         }
     };
     let _ = cwd;
-    let (content, is_error) = cli::tool_call(&store, &args);
+    let (content, is_error) = cli::tool_call(&store, &args, session_id(params));
     serde_json::json!({ "content": content, "is_error": is_error })
+}
+
+fn session_id(params: &serde_json::Value) -> &str {
+    params["session"]["id"].as_str().unwrap_or("")
+}
+
+pub fn on_turn_end(params: &serde_json::Value) {
+    let Ok(home) = crate::goal::gray_home() else {
+        return;
+    };
+    let Ok(store) = Store::new(&home) else {
+        return;
+    };
+    if let Some((card, prompt)) = crate::goal::continuation(&store, params) {
+        crate::goal::queue_continuation(&home, session_id(params), &card, &prompt);
+    }
 }
 
 pub fn handle_goal(req: &serde_json::Value) -> (Option<serde_json::Value>, bool) {
